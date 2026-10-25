@@ -10,6 +10,7 @@ const {
 } = require('../middleware/auth');
 const { notify } = require('../utils/notify');
 const { removeUserFromProjectRoom, closeProjectRoom } = require('../realtime');
+const { asTrimmedString, isOptionalString } = require('../utils/validate');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -56,12 +57,16 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { name, description, color } = req.body || {};
-    if (!name || name.trim().length < 2) {
-      return res.status(400).json({ error: 'Project name must be at least 2 characters.' });
+    const cleanName = asTrimmedString(name, { min: 2, max: 80 });
+    if (!cleanName) {
+      return res.status(400).json({ error: 'Project name must be a string of 2-80 characters.' });
+    }
+    if (!isOptionalString(description, { max: 400 })) {
+      return res.status(400).json({ error: 'Description must be a string of at most 400 characters.' });
     }
     const project = await Project.create({
-      name: name.trim(),
-      description: (description || '').trim(),
+      name: cleanName,
+      description: (typeof description === 'string' ? description : '').trim(),
       color: COLORS.includes(color) ? color : 'emerald',
       owner: req.user.id,
       members: [req.user.id],
@@ -112,12 +117,19 @@ router.patch('/:projectId', requireProjectMember, requireProjectOwner, async (re
   try {
     const { name, description, color } = req.body || {};
     if (name !== undefined) {
-      if (name.trim().length < 2) {
-        return res.status(400).json({ error: 'Project name must be at least 2 characters.' });
+      const cleanName = asTrimmedString(name, { min: 2, max: 80 });
+      if (!cleanName) {
+        return res.status(400).json({ error: 'Project name must be a string of 2-80 characters.' });
       }
-      req.project.name = name.trim();
+      req.project.name = cleanName;
     }
-    if (description !== undefined) req.project.description = (description || '').trim();
+    if (description !== undefined) {
+      const cleanDescription = asTrimmedString(description, { max: 400 });
+      if (cleanDescription === undefined) {
+        return res.status(400).json({ error: 'Description must be a string of at most 400 characters.' });
+      }
+      req.project.description = cleanDescription;
+    }
     if (color !== undefined && COLORS.includes(color)) req.project.color = color;
     await req.project.save();
     res.json({ project: req.project });
@@ -158,10 +170,11 @@ router.delete('/:projectId', requireProjectMember, requireProjectOwner, async (r
 router.post('/:projectId/members', requireProjectMember, requireProjectOwner, async (req, res) => {
   try {
     const { email } = req.body || {};
-    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    const cleanEmail = asTrimmedString(email, { max: 254 });
+    if (!cleanEmail || !/^\S+@\S+\.\S+$/.test(cleanEmail)) {
       return res.status(400).json({ error: 'Please provide a valid email.' });
     }
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    const user = await User.findOne({ email: cleanEmail.toLowerCase() });
     if (!user) {
       return res.status(404).json({
         error: 'No TaskFlow account with that email. Ask your teammate to sign up first.',

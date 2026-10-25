@@ -2,6 +2,7 @@ const express = require('express');
 const Comment = require('../models/Comment');
 const { requireAuth, requireTaskMember } = require('../middleware/auth');
 const { notify } = require('../utils/notify');
+const { asTrimmedString } = require('../utils/validate');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -26,15 +27,15 @@ router.get('/:taskId/comments', requireTaskMember, async (req, res) => {
 router.post('/:taskId/comments', requireTaskMember, async (req, res) => {
   try {
     const { content } = req.body || {};
-    if (!content || !content.trim()) {
-      return res.status(400).json({ error: 'Comment cannot be empty.' });
-    }
-    if (content.trim().length > 1000) {
-      return res.status(400).json({ error: 'Comment is too long (max 1000 characters).' });
+    const cleanContent = asTrimmedString(content, { min: 1, max: 1000 });
+    if (!cleanContent) {
+      return res
+        .status(400)
+        .json({ error: 'Comment cannot be empty and must be a string of at most 1000 characters.' });
     }
 
     const comment = await Comment.create({
-      content: content.trim(),
+      content: cleanContent,
       task: req.task._id,
       author: req.user.id,
     });

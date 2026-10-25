@@ -2,6 +2,13 @@ const express = require('express');
 const Task = require('../models/Task');
 const { requireAuth, requireTaskMember } = require('../middleware/auth');
 const { notify } = require('../utils/notify');
+const {
+  asTrimmedString,
+  isOptionalString,
+  isOptionalDate,
+  isOptionalObjectId,
+  isOptionalNumber,
+} = require('../utils/validate');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -19,8 +26,18 @@ const TASK_POPULATE = [
 router.post('/', requireTaskMember, async (req, res) => {
   try {
     const { title, description, status, priority, dueDate, assignee } = req.body || {};
-    if (!title || !title.trim()) {
-      return res.status(400).json({ error: 'Task title is required.' });
+    const cleanTitle = asTrimmedString(title, { min: 1, max: 140 });
+    if (!cleanTitle) {
+      return res.status(400).json({ error: 'Task title is required (max 140 characters).' });
+    }
+    if (!isOptionalString(description, { max: 2000 })) {
+      return res.status(400).json({ error: 'Description must be a string of at most 2000 characters.' });
+    }
+    if (!isOptionalDate(dueDate)) {
+      return res.status(400).json({ error: 'Due date is not a valid date.' });
+    }
+    if (!isOptionalObjectId(assignee)) {
+      return res.status(400).json({ error: 'The assignee must be a valid user id.' });
     }
     if (assignee && !req.project.members.some((m) => m.equals(assignee))) {
       return res.status(400).json({ error: 'The assignee must be a project member.' });
@@ -31,8 +48,8 @@ router.post('/', requireTaskMember, async (req, res) => {
       .select('position')
       .lean();
     const task = await Task.create({
-      title: title.trim(),
-      description: (description || '').trim(),
+      title: cleanTitle,
+      description: (typeof description === 'string' ? description : '').trim(),
       status: STATUSES.includes(status) ? status : 'TODO',
       priority: PRIORITIES.includes(priority) ? priority : 'MEDIUM',
       dueDate: dueDate ? new Date(dueDate) : null,
@@ -75,10 +92,19 @@ router.patch('/:taskId', requireTaskMember, async (req, res) => {
     const updates = {};
 
     if (body.title !== undefined) {
-      if (!body.title.trim()) return res.status(400).json({ error: 'Task title cannot be empty.' });
-      updates.title = body.title.trim();
+      const cleanTitle = asTrimmedString(body.title, { min: 1, max: 140 });
+      if (!cleanTitle) {
+        return res.status(400).json({ error: 'Task title must be a string of 1-140 characters.' });
+      }
+      updates.title = cleanTitle;
     }
-    if (body.description !== undefined) updates.description = (body.description || '').trim();
+    if (body.description !== undefined) {
+      const cleanDescription = asTrimmedString(body.description, { max: 2000 });
+      if (cleanDescription === undefined) {
+        return res.status(400).json({ error: 'Description must be a string of at most 2000 characters.' });
+      }
+      updates.description = cleanDescription;
+    }
     if (body.status !== undefined) {
       if (!STATUSES.includes(body.status)) {
         return res.status(400).json({ error: 'Invalid status.' });
@@ -91,9 +117,22 @@ router.patch('/:taskId', requireTaskMember, async (req, res) => {
       }
       updates.priority = body.priority;
     }
-    if (body.dueDate !== undefined) updates.dueDate = body.dueDate ? new Date(body.dueDate) : null;
-    if (body.position !== undefined) updates.position = Number(body.position) || 0;
+    if (body.dueDate !== undefined) {
+      if (!isOptionalDate(body.dueDate)) {
+        return res.status(400).json({ error: 'Due date is not a valid date.' });
+      }
+      updates.dueDate = body.dueDate ? new Date(body.dueDate) : null;
+    }
+    if (body.position !== undefined) {
+      if (!isOptionalNumber(body.position)) {
+        return res.status(400).json({ error: 'Position must be a number.' });
+      }
+      updates.position = Number(body.position) || 0;
+    }
     if (body.assignee !== undefined) {
+      if (!isOptionalObjectId(body.assignee)) {
+        return res.status(400).json({ error: 'The assignee must be a valid user id.' });
+      }
       if (body.assignee && !req.project.members.some((m) => m.equals(body.assignee))) {
         return res.status(400).json({ error: 'The assignee must be a project member.' });
       }

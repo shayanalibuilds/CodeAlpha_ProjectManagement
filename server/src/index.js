@@ -51,7 +51,23 @@ if (fs.existsSync(clientDist)) {
 }
 
 // --- Error handler ---
+// Maps well-known client errors to 4xx so bad input never surfaces as a 500.
 app.use((err, req, res, next) => {
+  // Malformed JSON body from express.json()
+  if (err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && err.status === 400)) {
+    return res.status(400).json({ error: 'Request body is not valid JSON.' });
+  }
+  if (err?.name === 'ValidationError') {
+    const first = Object.values(err.errors || {})[0];
+    return res.status(400).json({ error: first?.message || 'Invalid input.' });
+  }
+  if (err?.name === 'CastError') {
+    return res.status(400).json({ error: `Invalid value for ${err.path || 'an identifier'}.` });
+  }
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body is too large.' });
+  }
+
   console.error('[unhandled]', err);
   res.status(500).json({ error: 'Unexpected server error.' });
 });
