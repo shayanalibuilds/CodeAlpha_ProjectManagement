@@ -128,9 +128,17 @@ router.patch('/:projectId', requireProjectMember, requireProjectOwner, async (re
 });
 
 // @route  DELETE /api/projects/:projectId
-// @desc   Delete project and its tasks/comments (owner only)
+// @desc   Delete project and its tasks/comments/notifications (owner only)
 router.delete('/:projectId', requireProjectMember, requireProjectOwner, async (req, res) => {
   try {
+    const Comment = require('../models/Comment');
+    const Notification = require('../models/Notification');
+
+    // Cascade: tasks -> their comments, plus every notification pointing at
+    // this project (or at its tasks), so no orphans are left behind.
+    const taskIds = await Task.find({ project: req.project._id }).distinct('_id');
+    await Comment.deleteMany({ task: { $in: taskIds } });
+    await Notification.deleteMany({ project: req.project._id });
     await Task.deleteMany({ project: req.project._id });
     await req.project.deleteOne();
 
