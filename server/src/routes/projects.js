@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Project = require('../models/Project');
 const Task = require('../models/Task');
 const User = require('../models/User');
@@ -14,6 +15,9 @@ const router = express.Router();
 router.use(requireAuth);
 
 const COLORS = ['emerald', 'amber', 'rose', 'violet', 'teal', 'orange'];
+
+const isValidObjectId = (value) =>
+  typeof value === 'string' && mongoose.Types.ObjectId.isValid(value);
 
 // @route  GET /api/projects
 // @desc   All projects the user belongs to, with task counts
@@ -190,6 +194,9 @@ router.delete(
   requireProjectOwner,
   async (req, res) => {
     try {
+      if (!isValidObjectId(req.params.userId)) {
+        return res.status(400).json({ error: 'Invalid user id.' });
+      }
       if (req.params.userId === req.user.id) {
         return res.status(400).json({ error: 'Owners cannot remove themselves.' });
       }
@@ -200,7 +207,26 @@ router.delete(
       req.project.members = req.project.members.filter((m) => !m.equals(req.params.userId));
       await req.project.save();
 
+      // Unassign every task of this project that was assigned to the removed
+      // member, so the board never shows a non-member as assignee.
+      const affectedIds = await Task.find({ project: req.project._id, assignee: removedId })
+        .distinct('_id');
+      if (affectedIds.length > 0) {
+        await Task.updateMany({ _id: { $in: affectedIds } }, { $set: { assignee: null } });
+        const affected = await Task.find({ _id: { $in: affectedIds } })
+          .populate('assignee', 'name email')
+          .populate('creator', 'name email');
+        const io = req.app.get('io');
+        for (const task of affected) {
+          io.to(`project:${req.project._id}`).emit('task:updated', {
+            projectId: req.project._id,
+            task,
+          });
+        }
+      }
+
       const io = req.app.get('io');
+
       io.to(`project:${req.project._id}`).emit('member:left', {
         projectId: req.project._id,
         userId: req.params.userId,
@@ -209,7 +235,7 @@ router.delete(
       // Evict the removed user's sockets from the project room immediately
       removeUserFromProjectRoom(io, req.project._id.toString(), req.params.userId);
 
-      res.json({ ok: true });
+      res.json({ ok: true, unassignedTasks: affectedIds.length });
     } catch (err) {
       console.error('[members/remove]', err);
       res.status(500).json({ error: 'Could not remove the member.' });
