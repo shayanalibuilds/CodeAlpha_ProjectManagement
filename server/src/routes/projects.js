@@ -8,6 +8,7 @@ const {
   requireProjectOwner,
 } = require('../middleware/auth');
 const { notify } = require('../utils/notify');
+const { removeUserFromProjectRoom, closeProjectRoom } = require('../realtime');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -128,6 +129,11 @@ router.delete('/:projectId', requireProjectMember, requireProjectOwner, async (r
   try {
     await Task.deleteMany({ project: req.project._id });
     await req.project.deleteOne();
+
+    // Tell the (former) room, then disband it so every socket stops listening
+    const io = req.app.get('io');
+    closeProjectRoom(io, req.project._id.toString());
+
     res.json({ ok: true });
   } catch (err) {
     console.error('[projects/delete]', err);
@@ -187,6 +193,10 @@ router.delete(
       if (req.params.userId === req.user.id) {
         return res.status(400).json({ error: 'Owners cannot remove themselves.' });
       }
+      const removedId = req.project.members.find((m) => m.equals(req.params.userId));
+      if (!removedId) {
+        return res.status(404).json({ error: 'That user is not a member of this project.' });
+      }
       req.project.members = req.project.members.filter((m) => !m.equals(req.params.userId));
       await req.project.save();
 
@@ -195,6 +205,9 @@ router.delete(
         projectId: req.project._id,
         userId: req.params.userId,
       });
+
+      // Evict the removed user's sockets from the project room immediately
+      removeUserFromProjectRoom(io, req.project._id.toString(), req.params.userId);
 
       res.json({ ok: true });
     } catch (err) {
