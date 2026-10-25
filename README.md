@@ -57,7 +57,7 @@ npm install              # root: installs `concurrently`
 npm run install-all      # installs server + client dependencies
 ```
 
-### 2. Configure environment (optional)
+### 2. Configure environment
 
 ```bash
 cp server/.env.example server/.env
@@ -66,9 +66,13 @@ cp server/.env.example server/.env
 ```env
 PORT=5000
 MONGODB_URI=                          # empty = in-memory Mongo (dev only)
-JWT_SECRET=change_this_to_a_long_random_secret
+JWT_SECRET=                           # REQUIRED for any non-local deployment
 CLIENT_URL=http://localhost:5173
 ```
+
+> **JWT_SECRET is mandatory outside local development.** The server refuses to start when
+> `NODE_ENV=production` and `JWT_SECRET` is missing (or still the `.env.example` placeholder),
+> so a deployment can never silently sign tokens with a publicly known key.
 
 ### 3. Run the app (dev mode)
 

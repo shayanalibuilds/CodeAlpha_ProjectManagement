@@ -1,8 +1,7 @@
 const jwt = require('jsonwebtoken');
 const Project = require('../models/Project');
 const Task = require('../models/Task');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_only_fallback_secret';
+const { JWT_SECRET } = require('../config/security');
 
 /** Verifies the JWT in the Authorization header and attaches req.user. */
 function requireAuth(req, res, next) {
