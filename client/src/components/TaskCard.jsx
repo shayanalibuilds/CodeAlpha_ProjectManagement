@@ -1,34 +1,50 @@
 import clsx from 'clsx';
-import {
-  CalendarDays,
-  MessageSquare,
-  GripVertical,
-} from 'lucide-react';
-import { PRIORITIES, avatarColor, initials } from '../lib/constants';
-
-function isOverdue(task) {
-  if (!task.dueDate || task.status === 'DONE') return false;
-  const endOfDay = new Date(task.dueDate);
-  endOfDay.setHours(23, 59, 59, 999);
-  return endOfDay < new Date();
-}
+import { CalendarDays, MessageSquare, GripVertical } from 'lucide-react';
+import { PRIORITIES, STATUSES, avatarColor, initials } from '../lib/constants';
+import { formatDueDate, isOverdue } from '../lib/dates';
 
 export default function TaskCard({ task, onOpen, onDragStart, onDragEnd, dragging }) {
   const priority = PRIORITIES[task.priority] || PRIORITIES.MEDIUM;
   const overdue = isOverdue(task);
+  const dueLabel = task.dueDate ? formatDueDate(task.dueDate) : '';
+  const statusLabel = STATUSES.find((s) => s.key === task.status)?.label || task.status;
+  const commentCount = task.commentCount || 0;
+
+  const accessibleName = [
+    task.title,
+    `${priority.label} priority`,
+    statusLabel,
+    dueLabel && `due ${dueLabel}${overdue ? ', overdue' : ''}`,
+    task.assignee ? `assigned to ${task.assignee.name}` : 'unassigned',
+    commentCount > 0 && `${commentCount} comment${commentCount === 1 ? '' : 's'}`,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const onKeyDown = (e) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onOpen(task);
+    }
+  };
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Open task: ${accessibleName}`}
       draggable
       onDragStart={(e) => onDragStart(e, task._id)}
       onDragEnd={onDragEnd}
       onClick={() => onOpen(task)}
+      onKeyDown={onKeyDown}
       className={clsx(
-        'group bg-white rounded-xl border border-slate-200 shadow-card hover:shadow-pop hover:border-brand-200 cursor-pointer transition-all p-3',
+        'group bg-white rounded-xl border border-slate-200 shadow-card hover:shadow-pop hover:border-brand-200 cursor-pointer transition-all p-3 outline-none focus-visible:ring-2 focus-visible:ring-brand-400',
         dragging && 'card-dragging'
       )}
     >
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-2" aria-hidden="true">
         <GripVertical
           size={14}
           className="text-slate-300 mt-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -55,22 +71,17 @@ export default function TaskCard({ task, onOpen, onDragStart, onDragEnd, draggin
               <span
                 className={clsx(
                   'flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md',
-                  overdue
-                    ? 'bg-rose-50 text-rose-600'
-                    : 'bg-slate-100 text-slate-500'
+                  overdue ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-500'
                 )}
               >
                 <CalendarDays size={10} />
-                {new Date(task.dueDate).toLocaleDateString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                })}
+                {dueLabel}
               </span>
             )}
-            {(task.commentCount || 0) > 0 && (
+            {commentCount > 0 && (
               <span className="flex items-center gap-1 text-[10px] font-semibold text-slate-400 px-1 py-0.5">
                 <MessageSquare size={10} />
-                {task.commentCount}
+                {commentCount}
               </span>
             )}
           </div>
@@ -86,10 +97,7 @@ export default function TaskCard({ task, onOpen, onDragStart, onDragEnd, draggin
             {initials(task.assignee.name)}
           </div>
         ) : (
-          <div
-            className="w-6 h-6 rounded-full border border-dashed border-slate-300 shrink-0"
-            title="Unassigned"
-          />
+          <div className="w-6 h-6 rounded-full border border-dashed border-slate-300 shrink-0" title="Unassigned" />
         )}
       </div>
     </div>
