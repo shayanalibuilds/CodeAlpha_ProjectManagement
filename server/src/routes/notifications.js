@@ -1,14 +1,16 @@
 const express = require('express');
 const Notification = require('../models/Notification');
 const { requireAuth } = require('../middleware/auth');
+const { asyncHandler } = require('../utils/validate');
 
 const router = express.Router();
 router.use(requireAuth);
 
 // @route  GET /api/notifications
 // @desc   Latest 30 notifications for the signed-in user
-router.get('/', async (req, res) => {
-  try {
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
     const notifications = await Notification.find({ user: req.user.id })
       .populate('project', 'name')
       .sort({ createdAt: -1 })
@@ -32,22 +34,17 @@ router.get('/', async (req, res) => {
       })),
       unreadCount,
     });
-  } catch (err) {
-    console.error('[notifications/list]', err);
-    res.status(500).json({ error: 'Could not load notifications.' });
-  }
-});
+  })
+);
 
 // @route  POST /api/notifications/read-all
 // @desc   Mark all notifications as read
-router.post('/read-all', async (req, res) => {
-  try {
+router.post(
+  '/read-all',
+  asyncHandler(async (req, res) => {
     await Notification.updateMany({ user: req.user.id, read: false }, { read: true });
     res.json({ ok: true });
-  } catch (err) {
-    console.error('[notifications/read-all]', err);
-    res.status(500).json({ error: 'Could not update notifications.' });
-  }
-});
+  })
+);
 
 module.exports = router;

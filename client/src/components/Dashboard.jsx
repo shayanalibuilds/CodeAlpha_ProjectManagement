@@ -10,6 +10,8 @@ import {
   Users,
   Loader2,
   Compass,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import clsx from 'clsx';
 import api, { getErrorMessage } from '../lib/api';
@@ -51,9 +53,12 @@ function CreateProjectModal({ open, onClose, onCreated }) {
     <Modal open={open} onClose={onClose} title="New project">
       <form onSubmit={submit} className="p-5 space-y-4">
         <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1.5">Project name</label>
+          <label htmlFor="project-name" className="block text-sm font-medium text-slate-600 mb-1.5">
+            Project name
+          </label>
           <input
-            autoFocus
+            id="project-name"
+            data-autofocus
             required
             minLength={2}
             maxLength={80}
@@ -64,10 +69,11 @@ function CreateProjectModal({ open, onClose, onCreated }) {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1.5">
+          <label htmlFor="project-description" className="block text-sm font-medium text-slate-600 mb-1.5">
             Description <span className="text-slate-400 font-normal">(optional)</span>
           </label>
           <textarea
+            id="project-description"
             rows={3}
             maxLength={400}
             value={description}
@@ -77,13 +83,17 @@ function CreateProjectModal({ open, onClose, onCreated }) {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-600 mb-2">Color</label>
-          <div className="flex gap-2">
+          <p id="project-color-label" className="block text-sm font-medium text-slate-600 mb-2">
+            Color
+          </p>
+          <div className="flex gap-2" role="radiogroup" aria-labelledby="project-color-label">
             {COLOR_CHOICES.map((c) => (
               <button
                 key={c}
                 type="button"
                 onClick={() => setColor(c)}
+                role="radio"
+                aria-checked={color === c}
                 aria-label={`Color ${c}`}
                 className={clsx(
                   'w-8 h-8 rounded-full transition-transform',
@@ -120,18 +130,21 @@ function CreateProjectModal({ open, onClose, onCreated }) {
 function ProjectCard({ project, isOwner, onDeleted }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const colors = PROJECT_COLORS[project.color] || PROJECT_COLORS.emerald;
   const counts = project.taskCounts || { total: 0, todo: 0, inProgress: 0, done: 0 };
   const pct = counts.total ? Math.round((counts.done / counts.total) * 100) : 0;
 
   const doDelete = async () => {
     setDeleting(true);
+    setDeleteError('');
     try {
       await api.delete(`/projects/${project._id}`);
       onDeleted(project._id);
     } catch (err) {
-      alert(getErrorMessage(err));
+      setDeleteError(getErrorMessage(err));
       setDeleting(false);
+      setConfirming(false);
     }
   };
 
@@ -150,23 +163,26 @@ function ProjectCard({ project, isOwner, onDeleted }) {
               {confirming ? (
                 <div className="flex items-center gap-1">
                   <button
+                    type="button"
                     onClick={doDelete}
                     disabled={deleting}
                     className="text-xs font-semibold text-white bg-rose-500 hover:bg-rose-600 rounded-lg px-2 py-1 disabled:opacity-60"
                   >
-                    {deleting ? <Loader2 size={12} className="animate-spin" /> : 'Confirm'}
+                    {deleting ? <Loader2 size={12} className="animate-spin" /> : 'Delete project'}
                   </button>
                   <button
+                    type="button"
                     onClick={() => setConfirming(false)}
                     className="text-xs text-slate-500 hover:text-slate-700 px-1"
                   >
-                    ✕
+                    Cancel
                   </button>
                 </div>
               ) : (
                 <button
+                  type="button"
                   onClick={() => setConfirming(true)}
-                  className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
+                  className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-all"
                   aria-label={`Delete ${project.name}`}
                 >
                   <Trash2 size={15} />
@@ -175,6 +191,11 @@ function ProjectCard({ project, isOwner, onDeleted }) {
             </div>
           )}
         </div>
+        {deleteError && (
+          <p role="alert" className="text-xs text-rose-600 mt-1">
+            {deleteError}
+          </p>
+        )}
         <p className="text-sm text-slate-500 mt-1 line-clamp-2 min-h-[2.5rem]">
           {project.description || 'No description yet.'}
         </p>
@@ -240,17 +261,24 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
 
   const load = async () => {
+    setLoadError('');
     try {
       const res = await api.get('/projects');
       setProjects(res.data.projects);
     } catch (err) {
-      alert(getErrorMessage(err));
+      setLoadError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
+  };
+
+  const retry = () => {
+    setLoading(true);
+    load();
   };
 
   useEffect(() => {
@@ -278,7 +306,7 @@ export default function Dashboard() {
               Hi {user?.name?.split(' ')[0]} 👋
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              Here's what's happening across your projects.
+              Here&apos;s what&apos;s happening across your projects.
             </p>
           </div>
           <button
@@ -333,6 +361,22 @@ export default function Dashboard() {
         {loading ? (
           <div className="flex justify-center py-16">
             <Spinner className="w-7 h-7" />
+          </div>
+        ) : loadError ? (
+          <div className="bg-white rounded-2xl shadow-card border border-slate-100" role="alert">
+            <EmptyState
+              icon={AlertCircle}
+              title="Could not load your projects"
+              hint={`${loadError} Your projects are safe; check your connection and try again.`}
+            >
+              <button
+                type="button"
+                onClick={retry}
+                className="flex items-center gap-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold px-4 py-2.5 text-sm transition-colors"
+              >
+                <RefreshCw size={16} aria-hidden="true" /> Try again
+              </button>
+            </EmptyState>
           </div>
         ) : projects.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-card border border-slate-100">

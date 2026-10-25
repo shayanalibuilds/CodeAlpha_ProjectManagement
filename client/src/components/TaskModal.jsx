@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   Trash2,
   Loader2,
@@ -9,6 +9,7 @@ import {
   Flag,
   ListTodo,
   AlignLeft,
+  AlertCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
 import api, { getErrorMessage } from '../lib/api';
@@ -17,12 +18,16 @@ import { useSocket } from '../context/SocketContext';
 import Modal from './ui/Modal';
 import Avatar from './ui/Avatar';
 import { STATUSES, PRIORITIES } from '../lib/constants';
+import { toDateInputValue } from '../lib/dates';
 
-function Field({ icon: Icon, label, children }) {
+function Field({ icon: Icon, label, htmlFor, children }) {
   return (
     <div>
-      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
-        <Icon size={12} /> {label}
+      <label
+        htmlFor={htmlFor}
+        className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5"
+      >
+        <Icon size={12} aria-hidden="true" /> {label}
       </label>
       {children}
     </div>
@@ -43,8 +48,16 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
   const [posting, setPosting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState('');
+  const [commentsError, setCommentsError] = useState('');
   const commentsEndRef = useRef(null);
   const taskId = task._id;
+  const ids = useId();
+  const fieldId = (name) => `${ids}-${name}`;
+
+  // Keep the editable fields in sync when a teammate changes the task.
+  useEffect(() => setTitle(task.title), [task.title]);
+  useEffect(() => setDescription(task.description || ''), [task.description]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,7 +65,7 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
     api
       .get(`/tasks/${taskId}/comments`)
       .then((res) => !cancelled && setComments(res.data.comments))
-      .catch(() => {})
+      .catch((err) => !cancelled && setCommentsError(getErrorMessage(err)))
       .finally(() => !cancelled && setLoadingComments(false));
     return () => {
       cancelled = true;
@@ -79,11 +92,12 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
 
   const patch = async (updates) => {
     setSaving(true);
+    setError('');
     try {
       const res = await api.patch(`/tasks/${taskId}`, updates);
       onChanged(res.data.task);
     } catch (err) {
-      alert(getErrorMessage(err));
+      setError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -104,6 +118,7 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
     const content = newComment.trim();
     if (!content) return;
     setPosting(true);
+    setError('');
     try {
       const res = await api.post(`/tasks/${taskId}/comments`, { content });
       setComments((prev) => {
@@ -111,9 +126,13 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
         return [...prev, res.data.comment];
       });
       setNewComment('');
-      onChanged({ ...task, commentCount: (task.commentCount || 0) + 1 });
+      // The server returns the authoritative total; the comment:added socket
+      // event carries the same number, so applying both is idempotent.
+      if (typeof res.data.commentCount === 'number') {
+        onChanged({ ...task, commentCount: res.data.commentCount });
+      }
     } catch (err) {
-      alert(getErrorMessage(err));
+      setError(getErrorMessage(err));
     } finally {
       setPosting(false);
     }
@@ -125,19 +144,23 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
       onDeleted(taskId);
       onClose();
     } catch (err) {
-      alert(getErrorMessage(err));
+      setError(getErrorMessage(err));
+      setConfirmDelete(false);
     }
   };
 
-  const dueDateValue = task.dueDate ? task.dueDate.slice(0, 10) : '';
+  const dueDateValue = toDateInputValue(task.dueDate);
+  const titleId = fieldId('title');
 
   return (
-    <Modal open onClose={onClose} width="max-w-2xl" title={undefined}>
+    <Modal open onClose={onClose} width="max-w-2xl" labelledBy={titleId}>
       <div className="p-5 sm:p-6">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <input
+              id={titleId}
+              data-autofocus
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={saveTitle}
@@ -163,6 +186,7 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
           {confirmDelete ? (
             <div className="flex items-center gap-1.5 shrink-0">
               <button
+                type="button"
                 onClick={doDelete}
                 className="text-xs font-semibold text-white bg-rose-500 hover:bg-rose-600 rounded-lg px-2.5 py-1.5"
               >
@@ -186,10 +210,28 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
           )}
         </div>
 
+        {error && (
+          <div
+            role="alert"
+            className="mt-4 flex items-start gap-2 rounded-xl bg-rose-50 text-rose-700 text-sm px-3 py-2"
+          >
+            <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span className="flex-1">{error}</span>
+            <button
+              type="button"
+              onClick={() => setError('')}
+              className="text-xs font-semibold underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Fields grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
-          <Field icon={ListTodo} label="Status">
+          <Field icon={ListTodo} label="Status" htmlFor={fieldId('status')}>
             <select
+              id={fieldId('status')}
               value={task.status}
               onChange={(e) => patch({ status: e.target.value })}
               className={inputCls}
@@ -201,8 +243,9 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
               ))}
             </select>
           </Field>
-          <Field icon={Flag} label="Priority">
+          <Field icon={Flag} label="Priority" htmlFor={fieldId('priority')}>
             <select
+              id={fieldId('priority')}
               value={task.priority}
               onChange={(e) => patch({ priority: e.target.value })}
               className={inputCls}
@@ -214,8 +257,9 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
               ))}
             </select>
           </Field>
-          <Field icon={User} label="Assignee">
+          <Field icon={User} label="Assignee" htmlFor={fieldId('assignee')}>
             <select
+              id={fieldId('assignee')}
               value={task.assignee?._id || ''}
               onChange={(e) => patch({ assignee: e.target.value || null })}
               className={inputCls}
@@ -228,13 +272,13 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
               ))}
             </select>
           </Field>
-          <Field icon={CalendarDays} label="Due date">
+          <Field icon={CalendarDays} label="Due date" htmlFor={fieldId('due')}>
             <input
+              id={fieldId('due')}
               type="date"
               value={dueDateValue}
-              onChange={(e) =>
-                patch({ dueDate: e.target.value ? new Date(e.target.value).toISOString() : null })
-              }
+              // Send the calendar date as-is (YYYY-MM-DD); the API stores it as UTC midnight.
+              onChange={(e) => patch({ dueDate: e.target.value || null })}
               className={inputCls}
             />
           </Field>
@@ -242,8 +286,9 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
 
         {/* Description */}
         <div className="mt-5">
-          <Field icon={AlignLeft} label="Description">
+          <Field icon={AlignLeft} label="Description" htmlFor={fieldId('description')}>
             <textarea
+              id={fieldId('description')}
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -266,7 +311,12 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
                 <Loader2 size={13} className="animate-spin" /> Loading comments…
               </p>
             )}
-            {!loadingComments && comments.length === 0 && (
+            {commentsError && (
+              <p role="alert" className="text-sm text-rose-600">
+                Could not load comments: {commentsError}
+              </p>
+            )}
+            {!loadingComments && !commentsError && comments.length === 0 && (
               <p className="text-sm text-slate-400 py-2">
                 No comments yet — start the discussion below.
               </p>
@@ -308,6 +358,7 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               placeholder="Write a comment…"
+              aria-label="Write a comment"
               maxLength={1000}
               className="flex-1 rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400 transition"
             />

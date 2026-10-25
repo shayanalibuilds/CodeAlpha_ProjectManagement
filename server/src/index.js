@@ -1,72 +1,38 @@
 require('dotenv').config();
-const path = require('path');
-const fs = require('fs');
-const express = require('express');
-const cors = require('cors');
-const http = require('http');
+const { jwtSecret } = require('./config/env');
+const { connectDB } = require('./config/db');
+const { createApp } = require('./app');
+const { seedDemoData, demoUserExists } = require('./seed/demoData');
 
-const connectDB = require('./config/db');
-const { initSocket } = require('./realtime');
+const { app, server, io } = createApp();
 
-const authRoutes = require('./routes/auth');
-const projectRoutes = require('./routes/projects');
-const taskRoutes = require('./routes/tasks');
-const commentRoutes = require('./routes/comments');
-const notificationRoutes = require('./routes/notifications');
+async function start() {
+  // Fail fast on a missing/unsafe JWT secret before accepting any traffic.
+  jwtSecret();
 
-const app = express();
-const server = http.createServer(app);
+  const { inMemory } = await connectDB();
 
-// --- Middleware ---
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    credentials: true,
-  })
-);
-app.use(express.json());
+  // The in-memory database starts empty on every run, so seed the demo
+  // accounts into it (set SEED_ON_START=false to disable).
+  const seedOnStart = process.env.SEED_ON_START
+    ? process.env.SEED_ON_START === 'true'
+    : inMemory;
+  if (seedOnStart && !(await demoUserExists())) {
+    await seedDemoData();
+    console.log('[seed] Demo data loaded: demo@taskflow.dev / demo1234');
+  }
 
-// --- API routes ---
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectRoutes);
-app.use('/api/tasks', taskRoutes);
-app.use('/api/tasks', commentRoutes); // /api/tasks/:taskId/comments
-app.use('/api/notifications', notificationRoutes);
+  const PORT = process.env.PORT || 5000;
+  await new Promise((resolve) => server.listen(PORT, resolve));
+  console.log(`[server] TaskFlow API running on http://localhost:${PORT}`);
+  console.log('[server] Socket.io realtime enabled');
+}
 
-app.get('/api/health', (req, res) => res.json({ ok: true, name: 'TaskFlow API' }));
-
-// --- Socket.io realtime (bonus feature) ---
-const io = initSocket(server);
-app.set('io', io);
-
-// --- Serve the built React client (production / single-port deployment) ---
-const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');
-if (fs.existsSync(clientDist)) {
-  app.use(express.static(clientDist));
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next();
-    res.sendFile(path.join(clientDist, 'index.html'));
+if (require.main === module) {
+  start().catch((err) => {
+    console.error('[server] Failed to start:', err.message || err);
+    process.exit(1);
   });
 }
 
-// --- Error handler ---
-app.use((err, req, res, next) => {
-  console.error('[unhandled]', err);
-  res.status(500).json({ error: 'Unexpected server error.' });
-});
-
-// --- Start ---
-const PORT = process.env.PORT || 5000;
-
-(async () => {
-  try {
-    await connectDB();
-    server.listen(PORT, () => {
-      console.log(`[server] TaskFlow API running on http://localhost:${PORT}`);
-      console.log('[server] Socket.io realtime enabled');
-    });
-  } catch (err) {
-    console.error('[server] Failed to start:', err);
-    process.exit(1);
-  }
-})();
+module.exports = { app, server, io, start };

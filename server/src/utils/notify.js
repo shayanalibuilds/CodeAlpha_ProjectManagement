@@ -10,7 +10,7 @@ async function notify(io, { userId, type, message, projectId = null, taskId = nu
   const notification = await Notification.create({
     user: userId,
     type,
-    message,
+    message: message.length > 300 ? `${message.slice(0, 299)}…` : message,
     project: projectId,
     task: taskId,
   });

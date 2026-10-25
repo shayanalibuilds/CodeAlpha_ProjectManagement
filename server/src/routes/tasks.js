@@ -1,7 +1,15 @@
 const express = require('express');
 const Task = require('../models/Task');
+const Comment = require('../models/Comment');
 const { requireAuth, requireTaskMember } = require('../middleware/auth');
 const { notify } = require('../utils/notify');
+const {
+  asyncHandler,
+  badRequest,
+  readString,
+  readDueDate,
+  readOptionalObjectId,
+} = require('../utils/validate');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -14,44 +22,66 @@ const TASK_POPULATE = [
   { path: 'creator', select: 'name email' },
 ];
 
+/** Task as sent to clients: populated, plus its current comment count. */
+async function serializeTask(task) {
+  const populated = await task.populate(TASK_POPULATE);
+  const commentCount = await Comment.countDocuments({ task: task._id });
+  return { ...populated.toObject(), commentCount };
+}
+
+function readEnum(value, allowed, label) {
+  if (value === undefined) return undefined;
+  if (!allowed.includes(value)) throw badRequest(`Invalid ${label}.`);
+  return value;
+}
+
+function checkAssignee(project, assignee) {
+  if (assignee && !project.members.some((m) => m.equals(assignee))) {
+    throw badRequest('The assignee must be a project member.');
+  }
+}
+
 // @route  POST /api/tasks
 // @desc   Create a task on a project board
-router.post('/', requireTaskMember, async (req, res) => {
-  try {
-    const { title, description, status, priority, dueDate, assignee } = req.body || {};
-    if (!title || !title.trim()) {
-      return res.status(400).json({ error: 'Task title is required.' });
-    }
-    if (assignee && !req.project.members.some((m) => m.equals(assignee))) {
-      return res.status(400).json({ error: 'The assignee must be a project member.' });
-    }
+router.post(
+  '/',
+  requireTaskMember,
+  asyncHandler(async (req, res) => {
+    const body = req.body || {};
+    const title = readString(body, 'title', { label: 'Task title', required: true, max: 140 });
+    const description = readString(body, 'description', { label: 'Description', max: 2000, allowNull: true }) || '';
+    const status = readEnum(body.status, STATUSES, 'status') || 'TODO';
+    const priority = readEnum(body.priority, PRIORITIES, 'priority') || 'MEDIUM';
+    const dueDate = readDueDate(body.dueDate) ?? null;
+    const assignee = readOptionalObjectId(body.assignee, 'Assignee') ?? null;
+    checkAssignee(req.project, assignee);
 
-    const last = await Task.findOne({ project: req.project._id, status: status || 'TODO' })
+    const last = await Task.findOne({ project: req.project._id, status })
       .sort({ position: -1 })
       .select('position')
       .lean();
     const task = await Task.create({
-      title: title.trim(),
-      description: (description || '').trim(),
-      status: STATUSES.includes(status) ? status : 'TODO',
-      priority: PRIORITIES.includes(priority) ? priority : 'MEDIUM',
-      dueDate: dueDate ? new Date(dueDate) : null,
+      title,
+      description,
+      status,
+      priority,
+      dueDate,
       position: (last?.position ?? 0) + 1,
       project: req.project._id,
-      assignee: assignee || null,
+      assignee,
       creator: req.user.id,
     });
 
-    const populated = await task.populate(TASK_POPULATE);
+    const payload = await serializeTask(task);
     const io = req.app.get('io');
     io.to(`project:${req.project._id}`).emit('task:created', {
       projectId: req.project._id.toString(),
-      task: populated,
+      task: payload,
     });
 
-    if (assignee && assignee.toString() !== req.user.id) {
+    if (assignee && assignee !== req.user.id) {
       await notify(io, {
-        userId: assignee.toString(),
+        userId: assignee,
         type: 'TASK_ASSIGNED',
         message: `${req.user.name} assigned you a task: "${task.title}" (${req.project.name}).`,
         projectId: req.project._id,
@@ -59,45 +89,44 @@ router.post('/', requireTaskMember, async (req, res) => {
       });
     }
 
-    res.status(201).json({ task: populated });
-  } catch (err) {
-    console.error('[tasks/create]', err);
-    res.status(500).json({ error: 'Could not create the task.' });
-  }
-});
+    res.status(201).json({ task: payload });
+  })
+);
 
 // @route  PATCH /api/tasks/:taskId
 // @desc   Update title/description/status/priority/dueDate/assignee/position
-router.patch('/:taskId', requireTaskMember, async (req, res) => {
-  try {
+router.patch(
+  '/:taskId',
+  requireTaskMember,
+  asyncHandler(async (req, res) => {
     const task = req.task;
     const body = req.body || {};
     const updates = {};
 
-    if (body.title !== undefined) {
-      if (!body.title.trim()) return res.status(400).json({ error: 'Task title cannot be empty.' });
-      updates.title = body.title.trim();
+    const title = readString(body, 'title', { label: 'Task title', max: 140 });
+    if (title !== undefined) {
+      if (!title) throw badRequest('Task title cannot be empty.');
+      updates.title = title;
     }
-    if (body.description !== undefined) updates.description = (body.description || '').trim();
-    if (body.status !== undefined) {
-      if (!STATUSES.includes(body.status)) {
-        return res.status(400).json({ error: 'Invalid status.' });
+    const description = readString(body, 'description', { label: 'Description', max: 2000, allowNull: true });
+    if (description !== undefined) updates.description = description;
+    const status = readEnum(body.status, STATUSES, 'status');
+    if (status !== undefined) updates.status = status;
+    const priority = readEnum(body.priority, PRIORITIES, 'priority');
+    if (priority !== undefined) updates.priority = priority;
+    const dueDate = readDueDate(body.dueDate);
+    if (dueDate !== undefined) updates.dueDate = dueDate;
+    if (body.position !== undefined) {
+      const position = Number(body.position);
+      if (typeof body.position === 'boolean' || !Number.isFinite(position)) {
+        throw badRequest('position must be a number.');
       }
-      updates.status = body.status;
+      updates.position = position;
     }
-    if (body.priority !== undefined) {
-      if (!PRIORITIES.includes(body.priority)) {
-        return res.status(400).json({ error: 'Invalid priority.' });
-      }
-      updates.priority = body.priority;
-    }
-    if (body.dueDate !== undefined) updates.dueDate = body.dueDate ? new Date(body.dueDate) : null;
-    if (body.position !== undefined) updates.position = Number(body.position) || 0;
-    if (body.assignee !== undefined) {
-      if (body.assignee && !req.project.members.some((m) => m.equals(body.assignee))) {
-        return res.status(400).json({ error: 'The assignee must be a project member.' });
-      }
-      updates.assignee = body.assignee || null;
+    const assignee = readOptionalObjectId(body.assignee, 'Assignee');
+    if (assignee !== undefined) {
+      checkAssignee(req.project, assignee);
+      updates.assignee = assignee;
     }
 
     // Capture RAW ids before populate() replaces them with objects
@@ -105,24 +134,21 @@ router.patch('/:taskId', requireTaskMember, async (req, res) => {
     const rawCreatorId = task.creator ? task.creator.toString() : null;
 
     const statusChanged = updates.status && updates.status !== task.status;
-    const assigneeChanged =
-      updates.assignee !== undefined &&
-      (updates.assignee || null)?.toString() !== (rawAssigneeId || '');
+    const assigneeChanged = updates.assignee !== undefined && (updates.assignee || null) !== rawAssigneeId;
 
     Object.assign(task, updates);
     await task.save();
-    const populated = await task.populate(TASK_POPULATE);
+    const payload = await serializeTask(task);
 
     const io = req.app.get('io');
     io.to(`project:${req.project._id}`).emit('task:updated', {
       projectId: req.project._id.toString(),
-      task: populated,
+      task: payload,
     });
 
     if (statusChanged) {
       // Notify the current assignee (post-update) or the task creator
-      const newAssigneeId =
-        updates.assignee !== undefined ? updates.assignee || null : rawAssigneeId;
+      const newAssigneeId = updates.assignee !== undefined ? updates.assignee || null : rawAssigneeId;
       const target = newAssigneeId || rawCreatorId;
       if (target && target !== req.user.id) {
         const labels = {
@@ -140,9 +166,9 @@ router.patch('/:taskId', requireTaskMember, async (req, res) => {
       }
     }
 
-    if (assigneeChanged && updates.assignee && updates.assignee.toString() !== req.user.id) {
+    if (assigneeChanged && updates.assignee && updates.assignee !== req.user.id) {
       await notify(io, {
-        userId: updates.assignee.toString(),
+        userId: updates.assignee,
         type: 'TASK_ASSIGNED',
         message: `${req.user.name} assigned you a task: "${task.title}" (${req.project.name}).`,
         projectId: req.project._id,
@@ -150,19 +176,19 @@ router.patch('/:taskId', requireTaskMember, async (req, res) => {
       });
     }
 
-    res.json({ task: populated });
-  } catch (err) {
-    console.error('[tasks/patch]', err);
-    res.status(500).json({ error: 'Could not update the task.' });
-  }
-});
+    res.json({ task: payload });
+  })
+);
 
 // @route  DELETE /api/tasks/:taskId
-// @desc   Delete a task and its comments
-router.delete('/:taskId', requireTaskMember, async (req, res) => {
-  try {
-    const Comment = require('../models/Comment');
+// @desc   Delete a task, its comments and its notifications
+router.delete(
+  '/:taskId',
+  requireTaskMember,
+  asyncHandler(async (req, res) => {
+    const Notification = require('../models/Notification');
     await Comment.deleteMany({ task: req.task._id });
+    await Notification.deleteMany({ task: req.task._id });
     await req.task.deleteOne();
 
     const io = req.app.get('io');
@@ -172,10 +198,7 @@ router.delete('/:taskId', requireTaskMember, async (req, res) => {
     });
 
     res.json({ ok: true });
-  } catch (err) {
-    console.error('[tasks/delete]', err);
-    res.status(500).json({ error: 'Could not delete the task.' });
-  }
-});
+  })
+);
 
 module.exports = router;

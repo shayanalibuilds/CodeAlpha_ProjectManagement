@@ -122,7 +122,7 @@ function NotificationsBell() {
               <p className="text-sm text-slate-400 text-center py-8">Loading…</p>
             )}
             {!loading && items.length === 0 && (
-              <p className="text-sm text-slate-400 text-center py-8">You're all caught up.</p>
+              <p className="text-sm text-slate-400 text-center py-8">You&apos;re all caught up.</p>
             )}
             {items.map((n) => {
               const meta = TYPE_ICONS[n.type] || TYPE_ICONS.TASK_STATUS;
