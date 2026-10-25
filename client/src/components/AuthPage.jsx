@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import {
   KanbanSquare,
@@ -10,6 +10,7 @@ import {
   UserPlus,
   Sparkles,
 } from 'lucide-react';
+import api from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 
 export default function AuthPage() {
@@ -19,6 +20,19 @@ export default function AuthPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [demoAvailable, setDemoAvailable] = useState(false);
+
+  // The demo button only makes sense when the demo account has been seeded
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get('/auth/demo-status')
+      .then((res) => !cancelled && setDemoAvailable(Boolean(res.data.available)))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!loading && user) return <Navigate to="/" replace />;
 
@@ -175,23 +189,27 @@ export default function AuthPage() {
           </button>
         </form>
 
-        <div className="flex items-center gap-3 my-6">
-          <div className="h-px bg-slate-200 flex-1" />
-          <span className="text-xs text-slate-400">or</span>
-          <div className="h-px bg-slate-200 flex-1" />
-        </div>
+        {demoAvailable && (
+          <>
+            <div className="flex items-center gap-3 my-6">
+              <div className="h-px bg-slate-200 flex-1" />
+              <span className="text-xs text-slate-400">or</span>
+              <div className="h-px bg-slate-200 flex-1" />
+            </div>
 
-        <button
-          onClick={demo}
-          disabled={busy}
-          className="w-full flex items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 hover:bg-brand-100 text-brand-700 font-semibold py-2.5 text-sm transition-colors disabled:opacity-60"
-        >
-          <Sparkles size={16} />
-          Explore with the demo account
-        </button>
-        <p className="text-xs text-slate-400 mt-2 text-center">
-          demo@taskflow.dev · demo1234 — preloaded with sample projects
-        </p>
+            <button
+              onClick={demo}
+              disabled={busy}
+              className="w-full flex items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 hover:bg-brand-100 text-brand-700 font-semibold py-2.5 text-sm transition-colors disabled:opacity-60"
+            >
+              <Sparkles size={16} />
+              Explore with the demo account
+            </button>
+            <p className="text-xs text-slate-400 mt-2 text-center">
+              demo@taskflow.dev · demo1234 — preloaded with sample projects
+            </p>
+          </>
+        )}
 
         <p className="text-sm text-slate-500 mt-8 text-center">
           {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}

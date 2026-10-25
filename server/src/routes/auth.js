@@ -61,6 +61,18 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// @route  GET /api/auth/demo-status
+// @desc   Whether the demo account exists (the client hides the demo button when it doesn't)
+router.get('/demo-status', async (req, res) => {
+  try {
+    const demo = await User.findOne({ email: 'demo@taskflow.dev' }).select('_id').lean();
+    res.json({ available: Boolean(demo) });
+  } catch (err) {
+    console.error('[auth/demo-status]', err);
+    res.json({ available: false });
+  }
+});
+
 // @route  GET /api/auth/me
 // @desc   Return the currently signed-in user
 router.get('/me', requireAuth, async (req, res) => {

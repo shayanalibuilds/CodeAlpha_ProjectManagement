@@ -85,7 +85,11 @@ This starts both processes with `concurrently`:
 - API + Socket.io → **http://localhost:5000**
 - React app (Vite, proxies `/api` & `/socket.io` to the server) → **http://localhost:5173**
 
-### 4. Seed demo data (optional but recommended)
+### 4. Demo data
+
+**Default setup (no `MONGODB_URI`):** the server seeds its own in-memory database automatically on first start, so the demo accounts below work immediately — including the **"Explore with the demo account"** button on the login page. The button is hidden automatically when no demo account exists. Data resets on restart.
+
+**Persistent database (`MONGODB_URI` set):** seeding is opt-in and wipes existing data:
 
 ```bash
 npm run seed

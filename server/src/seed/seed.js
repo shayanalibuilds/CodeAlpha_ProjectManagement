@@ -1,11 +1,16 @@
 /**
  * Seeds demo data so you can explore TaskFlow immediately.
- *   npm run seed
+ *   npm run seed          (requires MONGODB_URI — see below)
  * Demo login:  demo@taskflow.dev / demo1234
  * Teammates:   alex@taskflow.dev / demo1234, maya@taskflow.dev / demo1234
+ *
+ * With the default config (MONGODB_URI empty) the running server seeds its
+ * own in-memory database automatically on startup — `npm run seed` would
+ * create a throwaway in-memory DB in a separate process, so it refuses to
+ * run in that mode instead.
  */
 require('dotenv').config();
-const connectDB = require('../config/db');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Project = require('../models/Project');
 const Task = require('../models/Task');
@@ -13,15 +18,12 @@ const Comment = require('../models/Comment');
 const Notification = require('../models/Notification');
 const bcrypt = require('bcryptjs');
 
+/**
+ * Wipes and re-seeds demo data in the CURRENTLY CONNECTED database.
+ * Callers must have established a mongoose connection first
+ * (the API server on startup, or the CLI wrapper below for a real URI).
+ */
 async function seed() {
-  await connectDB();
-
-  if (!process.env.MONGODB_URI) {
-    console.log('\n⚠️  NOTE: MONGODB_URI is not set, so this is seeding an IN-MEMORY database.');
-    console.log('   In-memory data is lost when the server restarts.');
-    console.log('   For a persistent demo, set MONGODB_URI in server/.env first.\n');
-  }
-
   // Clean slate
   await Promise.all([
     User.deleteMany({}),
@@ -175,14 +177,40 @@ async function seed() {
     },
   ]);
 
-  console.log('Seed complete.');
-  console.log('  demo@taskflow.dev / demo1234   (project owner)');
-  console.log('  alex@taskflow.dev / demo1234   (member)');
-  console.log('  maya@taskflow.dev / demo1234   (member)');
-  process.exit(0);
+  return { users: 3, projects: 2, tasks: tasks.length };
 }
 
-seed().catch((err) => {
-  console.error('Seed failed:', err);
-  process.exit(1);
-});
+module.exports = seed;
+
+// --- CLI entry point ---
+if (require.main === module) {
+  const connectDB = require('../config/db');
+
+  (async () => {
+    if (!process.env.MONGODB_URI || process.env.MONGODB_URI.trim() === '') {
+      console.error(
+        '\nRefusing to seed: MONGODB_URI is not set.\n\n' +
+          'With the default config the API server automatically seeds its own\n' +
+          'in-memory database on startup — just run `npm run dev` and log in with\n' +
+          'demo@taskflow.dev / demo1234.\n\n' +
+          'To seed a persistent database instead, set MONGODB_URI in server/.env\n' +
+          '(e.g. mongodb://127.0.0.1:27017/taskflow) and run `npm run seed` again.\n'
+      );
+      process.exit(1);
+    }
+
+    try {
+      await connectDB();
+      await seed();
+      console.log('Seed complete.');
+      console.log('  demo@taskflow.dev / demo1234   (project owner)');
+      console.log('  alex@taskflow.dev / demo1234   (member)');
+      console.log('  maya@taskflow.dev / demo1234   (member)');
+      await mongoose.disconnect();
+      process.exit(0);
+    } catch (err) {
+      console.error('Seed failed:', err);
+      process.exit(1);
+    }
+  })();
+}

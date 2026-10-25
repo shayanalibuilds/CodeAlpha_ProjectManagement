@@ -6,6 +6,7 @@ const cors = require('cors');
 const http = require('http');
 
 const connectDB = require('./config/db');
+const maybeAutoSeed = require('./seed/autoSeed');
 const { initSocket } = require('./realtime');
 
 const authRoutes = require('./routes/auth');
@@ -61,6 +62,7 @@ const PORT = process.env.PORT || 5000;
 (async () => {
   try {
     await connectDB();
+    await maybeAutoSeed();
     server.listen(PORT, () => {
       console.log(`[server] TaskFlow API running on http://localhost:${PORT}`);
       console.log('[server] Socket.io realtime enabled');
