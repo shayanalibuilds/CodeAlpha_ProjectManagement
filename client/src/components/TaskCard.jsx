@@ -5,13 +5,7 @@ import {
   GripVertical,
 } from 'lucide-react';
 import { PRIORITIES, avatarColor, initials } from '../lib/constants';
-
-function isOverdue(task) {
-  if (!task.dueDate || task.status === 'DONE') return false;
-  const endOfDay = new Date(task.dueDate);
-  endOfDay.setHours(23, 59, 59, 999);
-  return endOfDay < new Date();
-}
+import { formatDueDate, isOverdue } from '../lib/dates';
 
 export default function TaskCard({ task, onOpen, onDragStart, onDragEnd, dragging }) {
   const priority = PRIORITIES[task.priority] || PRIORITIES.MEDIUM;
@@ -61,10 +55,7 @@ export default function TaskCard({ task, onOpen, onDragStart, onDragEnd, draggin
                 )}
               >
                 <CalendarDays size={10} />
-                {new Date(task.dueDate).toLocaleDateString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                })}
+                {formatDueDate(task.dueDate)}
               </span>
             )}
             {(task.commentCount || 0) > 0 && (

@@ -17,6 +17,7 @@ import { useSocket } from '../context/SocketContext';
 import Modal from './ui/Modal';
 import Avatar from './ui/Avatar';
 import { STATUSES, PRIORITIES } from '../lib/constants';
+import { dueDateInputValue, dueDateToPayload } from '../lib/dates';
 
 function Field({ icon: Icon, label, children }) {
   return (
@@ -131,7 +132,7 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
     }
   };
 
-  const dueDateValue = task.dueDate ? task.dueDate.slice(0, 10) : '';
+  const dueDateValue = dueDateInputValue(task.dueDate);
 
   return (
     <Modal open onClose={onClose} width="max-w-2xl" title={undefined}>
@@ -234,9 +235,7 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
             <input
               type="date"
               value={dueDateValue}
-              onChange={(e) =>
-                patch({ dueDate: e.target.value ? new Date(e.target.value).toISOString() : null })
-              }
+              onChange={(e) => patch({ dueDate: dueDateToPayload(e.target.value) })}
               className={inputCls}
             />
           </Field>
