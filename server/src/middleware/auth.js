@@ -1,8 +1,8 @@
 const jwt = require('jsonwebtoken');
 const Project = require('../models/Project');
 const Task = require('../models/Task');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_only_fallback_secret';
+const { jwtSecret } = require('../config/env');
+const { isValidObjectId } = require('../utils/validate');
 
 /** Verifies the JWT in the Authorization header and attaches req.user. */
 function requireAuth(req, res, next) {
@@ -12,7 +12,7 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Authentication required.' });
   }
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, jwtSecret());
     req.user = { id: payload.sub, name: payload.name, email: payload.email };
     next();
   } catch {
@@ -23,7 +23,7 @@ function requireAuth(req, res, next) {
 function signToken(user) {
   return jwt.sign(
     { sub: user._id.toString(), name: user.name, email: user.email },
-    JWT_SECRET,
+    jwtSecret(),
     { expiresIn: '7d' }
   );
 }
@@ -32,6 +32,9 @@ function signToken(user) {
 async function requireProjectMember(req, res, next) {
   try {
     const projectId = req.params.projectId;
+    if (!isValidObjectId(projectId)) {
+      return res.status(400).json({ error: 'Invalid project id.' });
+    }
     const project = await Project.findById(projectId);
     if (!project) {
       return res.status(404).json({ error: 'Project not found.' });
@@ -41,8 +44,8 @@ async function requireProjectMember(req, res, next) {
     }
     req.project = project;
     next();
-  } catch {
-    return res.status(400).json({ error: 'Invalid project id.' });
+  } catch (err) {
+    next(err);
   }
 }
 
@@ -57,7 +60,10 @@ async function requireTaskMember(req, res, next) {
     const taskId = req.params.taskId;
     let projectId;
 
-    if (taskId) {
+    if (taskId !== undefined) {
+      if (!isValidObjectId(taskId)) {
+        return res.status(400).json({ error: 'Invalid task id.' });
+      }
       const task = await Task.findById(taskId);
       if (!task) {
         return res.status(404).json({ error: 'Task not found.' });
@@ -69,6 +75,9 @@ async function requireTaskMember(req, res, next) {
       if (!projectId) {
         return res.status(400).json({ error: 'projectId is required.' });
       }
+      if (!isValidObjectId(projectId)) {
+        return res.status(400).json({ error: 'Invalid project id.' });
+      }
     }
 
     const project = await Project.findById(projectId);
@@ -77,8 +86,8 @@ async function requireTaskMember(req, res, next) {
     }
     req.project = project;
     next();
-  } catch {
-    return res.status(400).json({ error: 'Invalid task or project id.' });
+  } catch (err) {
+    next(err);
   }
 }
 
