@@ -1,13 +1,15 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_only_fallback_secret';
+const Project = require('../models/Project');
+const { jwtSecret } = require('../config/env');
+const { isValidObjectId } = require('../utils/validate');
 
 /**
  * Socket.io realtime layer.
  *  - Clients authenticate via JWT in the handshake auth payload.
  *  - Each user joins a personal room `user:<id>` (notifications).
- *  - Clients join project rooms `project:<id>` for board events.
+ *  - Clients join project rooms `project:<id>` for board events; only current
+ *    project members are allowed in (checked on every join).
  *  - Presence (online members per project) is tracked and broadcast.
  */
 
@@ -29,7 +31,7 @@ function initSocket(server) {
     try {
       const token = socket.handshake.auth?.token;
       if (!token) return next(new Error('Authentication required'));
-      const payload = jwt.verify(token, JWT_SECRET);
+      const payload = jwt.verify(token, jwtSecret());
       const user = await User.findById(payload.sub).select('name email');
       if (!user) return next(new Error('User not found'));
       socket.data.user = { id: user._id.toString(), name: user.name, email: user.email };
@@ -49,19 +51,34 @@ function initSocket(server) {
 
     socket.emit('connected', { user });
 
-    // Join a project board room
-    socket.on('project:join', async (payload = {}) => {
-      const projectId = payload.projectId;
-      if (!projectId) return;
-      socket.join(`project:${projectId}`);
+    // Join a project board room (members only). The optional ack callback
+    // receives { ok: true } or { ok: false, error }.
+    socket.on('project:join', async (payload = {}, ack) => {
+      const reply = typeof ack === 'function' ? ack : () => {};
+      try {
+        const projectId = payload?.projectId;
+        if (!isValidObjectId(projectId)) {
+          return reply({ ok: false, error: 'Invalid project id.' });
+        }
+        const isMember = await Project.exists({ _id: projectId, members: user.id });
+        if (!isMember) {
+          socket.emit('project:join:error', { projectId, error: 'You are not a member of this project.' });
+          return reply({ ok: false, error: 'You are not a member of this project.' });
+        }
+        socket.join(`project:${projectId}`);
 
-      if (!presenceByProject.has(projectId)) presenceByProject.set(projectId, new Map());
-      const presence = presenceByProject.get(projectId);
-      presence.set(user.id, { id: user.id, name: user.name });
-      io.to(`project:${projectId}`).emit('presence:update', {
-        projectId,
-        online: Array.from(presence.values()),
-      });
+        if (!presenceByProject.has(projectId)) presenceByProject.set(projectId, new Map());
+        const presence = presenceByProject.get(projectId);
+        presence.set(user.id, { id: user.id, name: user.name });
+        io.to(`project:${projectId}`).emit('presence:update', {
+          projectId,
+          online: Array.from(presence.values()),
+        });
+        reply({ ok: true });
+      } catch (err) {
+        console.error('[socket project:join]', err);
+        reply({ ok: false, error: 'Could not join the project.' });
+      }
     });
 
     socket.on('project:leave', (payload = {}) => {
@@ -139,4 +156,30 @@ function emitToUsers(io, userIds, event, payload) {
   }
 }
 
-module.exports = { initSocket, emitToProject, emitToUsers };
+/**
+ * Removes users' sockets from a project room (e.g. after they are removed
+ * from the project) and drops them from its presence list.
+ */
+function removeUsersFromProject(io, projectId, userIds) {
+  const pid = projectId.toString();
+  const presence = presenceByProject.get(pid);
+  for (const id of userIds.map(String)) {
+    io.in(`user:${id}`).socketsLeave(`project:${pid}`);
+    if (presence) presence.delete(id);
+  }
+  if (presence) {
+    io.to(`project:${pid}`).emit('presence:update', {
+      projectId: pid,
+      online: Array.from(presence.values()),
+    });
+  }
+}
+
+/** Closes a project room entirely (used when a project is deleted). */
+function closeProjectRoom(io, projectId) {
+  const pid = projectId.toString();
+  io.in(`project:${pid}`).socketsLeave(`project:${pid}`);
+  presenceByProject.delete(pid);
+}
+
+module.exports = { initSocket, emitToProject, emitToUsers, removeUsersFromProject, closeProjectRoom };
