@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -228,9 +228,31 @@ export default function Board() {
   }, [projectId]);
 
   // --- Realtime wiring ---
+  const refreshBoard = useCallback(() => {
+    return api
+      .get(`/projects/${projectId}`)
+      .then((res) => {
+        setProject(res.data.project);
+        setTasks(res.data.tasks);
+      })
+      .catch(() => {
+        /* keep current state; the initial load reports errors */
+      });
+  }, [projectId]);
+
   useEffect(() => {
     if (!socket || !projectId) return;
-    socket.emit('project:join', { projectId });
+
+    // Socket.io drops server-side room membership on disconnect, and the
+    // client reconnects on the SAME socket object - so rejoin on every
+    // (re)connect and refetch to catch events missed while offline.
+    const join = () => socket.emit('project:join', { projectId });
+    const onConnect = () => {
+      join();
+      refreshBoard();
+    };
+    join();
+    socket.on('connect', onConnect);
 
     const onPresence = (p) => {
       if (p.projectId === projectId) setOnline(p.online || []);
@@ -302,6 +324,7 @@ export default function Board() {
     socket.on('member:left', onMemberLeft);
 
     return () => {
+      socket.off('connect', onConnect);
       socket.emit('project:leave', { projectId });
       socket.off('presence:update', onPresence);
       socket.off('task:created', onTaskCreated);
@@ -311,7 +334,7 @@ export default function Board() {
       socket.off('member:joined', onMemberJoined);
       socket.off('member:left', onMemberLeft);
     };
-  }, [socket, projectId]);
+  }, [socket, projectId, refreshBoard]);
 
   const members = useMemo(() => {
     const raw = project?.members || [];
@@ -388,8 +411,11 @@ export default function Board() {
 
   const addTask = async (title, status) => {
     try {
-      await api.post('/tasks', { projectId, title, status });
-      // The socket echo adds the task to state (also fine if it doesn't arrive)
+      const res = await api.post('/tasks', { projectId, title, status });
+      // Show the task immediately; the socket echo de-duplicates by _id
+      setTasks((prev) =>
+        prev.some((t) => t._id === res.data.task._id) ? prev : [...prev, res.data.task]
+      );
     } catch (err) {
       alert(getErrorMessage(err));
     }
