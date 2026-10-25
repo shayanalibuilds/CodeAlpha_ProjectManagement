@@ -111,7 +111,9 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
         return [...prev, res.data.comment];
       });
       setNewComment('');
-      onChanged({ ...task, commentCount: (task.commentCount || 0) + 1 });
+      // The badge is updated in exactly one place: the comment:added socket
+      // event (the server sends it to the whole project room, author
+      // included). Incrementing here as well double-counted the comment.
     } catch (err) {
       alert(getErrorMessage(err));
     } finally {

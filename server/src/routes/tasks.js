@@ -152,10 +152,17 @@ router.patch('/:taskId', requireTaskMember, async (req, res) => {
     await task.save();
     const populated = await task.populate(TASK_POPULATE);
 
+    // Include the live comment count: the plain task document has none, and
+    // clients replace the whole task on update, which used to reset the
+    // comment badge to 0 after every move/edit.
+    const Comment = require('../models/Comment');
+    const commentCount = await Comment.countDocuments({ task: task._id });
+    const taskWithCount = { ...populated.toJSON(), commentCount };
+
     const io = req.app.get('io');
     io.to(`project:${req.project._id}`).emit('task:updated', {
       projectId: req.project._id.toString(),
-      task: populated,
+      task: taskWithCount,
     });
 
     if (statusChanged) {
@@ -189,7 +196,7 @@ router.patch('/:taskId', requireTaskMember, async (req, res) => {
       });
     }
 
-    res.json({ task: populated });
+    res.json({ task: taskWithCount });
   } catch (err) {
     console.error('[tasks/patch]', err);
     res.status(500).json({ error: 'Could not update the task.' });

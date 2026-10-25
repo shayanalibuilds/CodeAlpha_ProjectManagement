@@ -266,7 +266,15 @@ export default function Board() {
     };
     const onTaskUpdated = (payload) => {
       if (payload.projectId !== projectId) return;
-      setTasks((prev) => prev.map((t) => (t._id === payload.task._id ? payload.task : t)));
+      setTasks((prev) =>
+        prev.map((t) =>
+          t._id === payload.task._id
+            ? // Some task:updated broadcasts (e.g. member removal) carry no
+              // commentCount - keep the badge we already know.
+              { ...t, ...payload.task, commentCount: payload.task.commentCount ?? t.commentCount }
+            : t
+        )
+      );
     };
     const onTaskDeleted = (payload) => {
       if (payload.projectId !== projectId) return;
@@ -401,7 +409,13 @@ export default function Board() {
     setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, status } : t)));
     try {
       const res = await api.patch(`/tasks/${taskId}`, { status });
-      setTasks((prev) => prev.map((t) => (t._id === taskId ? res.data.task : t)));
+      setTasks((prev) =>
+        prev.map((t) =>
+          t._id === taskId
+            ? { ...t, ...res.data.task, commentCount: res.data.task.commentCount ?? t.commentCount }
+            : t
+        )
+      );
     } catch (err) {
       // Revert on failure
       setTasks((prev) => prev.map((t) => (t._id === taskId ? task : t)));
@@ -635,7 +649,13 @@ export default function Board() {
           members={members}
           onClose={() => setOpenTaskId(null)}
           onChanged={(updated) =>
-            setTasks((prev) => prev.map((t) => (t._id === updated._id ? updated : t)))
+            setTasks((prev) =>
+              prev.map((t) =>
+                t._id === updated._id
+                  ? { ...t, ...updated, commentCount: updated.commentCount ?? t.commentCount }
+                  : t
+              )
+            )
           }
           onDeleted={(id) => setTasks((prev) => prev.filter((t) => t._id !== id))}
         />
