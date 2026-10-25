@@ -51,8 +51,11 @@ function CreateProjectModal({ open, onClose, onCreated }) {
     <Modal open={open} onClose={onClose} title="New project">
       <form onSubmit={submit} className="p-5 space-y-4">
         <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1.5">Project name</label>
+          <label htmlFor="project-name" className="block text-sm font-medium text-slate-600 mb-1.5">
+            Project name
+          </label>
           <input
+            id="project-name"
             autoFocus
             required
             minLength={2}
@@ -64,10 +67,11 @@ function CreateProjectModal({ open, onClose, onCreated }) {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1.5">
+          <label htmlFor="project-description" className="block text-sm font-medium text-slate-600 mb-1.5">
             Description <span className="text-slate-400 font-normal">(optional)</span>
           </label>
           <textarea
+            id="project-description"
             rows={3}
             maxLength={400}
             value={description}
@@ -77,13 +81,17 @@ function CreateProjectModal({ open, onClose, onCreated }) {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-600 mb-2">Color</label>
-          <div className="flex gap-2">
+          <span id="project-color-label" className="block text-sm font-medium text-slate-600 mb-2">
+            Color
+          </span>
+          <div className="flex gap-2" role="radiogroup" aria-labelledby="project-color-label">
             {COLOR_CHOICES.map((c) => (
               <button
                 key={c}
                 type="button"
                 onClick={() => setColor(c)}
+                role="radio"
+                aria-checked={color === c}
                 aria-label={`Color ${c}`}
                 className={clsx(
                   'w-8 h-8 rounded-full transition-transform',
@@ -288,7 +296,7 @@ export default function Dashboard() {
               Hi {user?.name?.split(' ')[0]} 👋
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              Here's what's happening across your projects.
+              Here&apos;s what&apos;s happening across your projects.
             </p>
           </div>
           <button

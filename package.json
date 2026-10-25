@@ -9,7 +9,9 @@
     "seed": "cd server; npm run seed",
     "server": "cd server; npm run dev",
     "client": "cd client; npm run dev",
-    "build": "cd client; npm run build"
+    "build": "cd client; npm run build",
+    "lint": "npm run lint --prefix client",
+    "test": "npm test --prefix server"
   },
   "keywords": [
     "mern",

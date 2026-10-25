@@ -79,6 +79,9 @@ export default function Modal({
   const labelledby = title !== undefined ? 'modal-heading' : labelledById;
 
   return (
+    // Clicking the backdrop dismisses the dialog; all interactive content
+    // lives inside the dialog element below.
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 animate-fadeIn"
       onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}

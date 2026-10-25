@@ -7,11 +7,12 @@ const SocketContext = createContext(null);
 
 export function SocketProvider({ children }) {
   const { user } = useAuth();
+  const userId = user?.id;
   const socketRef = useRef(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -38,7 +39,7 @@ export function SocketProvider({ children }) {
       socketRef.current = null;
       setConnected(false);
     };
-  }, [user?.id]);
+  }, [userId]);
 
   return (
     <SocketContext.Provider value={{ socket: socketRef.current, connected }}>
