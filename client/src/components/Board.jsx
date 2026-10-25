@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -11,6 +11,7 @@ import {
   Filter,
   KanbanSquare,
   Inbox,
+  AlertCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
 import api, { getErrorMessage } from '../lib/api';
@@ -23,6 +24,19 @@ import Modal from './ui/Modal';
 import Avatar from './ui/Avatar';
 import { EmptyState, Spinner } from './ui/Bits';
 import { STATUSES, PRIORITIES, PROJECT_COLORS } from '../lib/constants';
+
+/**
+ * Merges an updated task into the existing one. Keeps the known comment count
+ * when the update does not carry one, so moving or editing a card never
+ * resets its comment badge.
+ */
+function mergeTask(prev, updated) {
+  return {
+    ...prev,
+    ...updated,
+    commentCount: typeof updated.commentCount === 'number' ? updated.commentCount : prev.commentCount,
+  };
+}
 
 const inputCls =
   'rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400 transition bg-white';
@@ -56,8 +70,9 @@ function AddMemberModal({ project, open, onClose, onAdded }) {
           want to invite to <span className="font-medium text-slate-700">{project.name}</span>.
         </p>
         <input
-          autoFocus
+          data-autofocus
           type="email"
+          aria-label="Teammate email"
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -87,11 +102,112 @@ function AddMemberModal({ project, open, onClose, onAdded }) {
   );
 }
 
+/** Lists project members; owners can remove someone after confirming. */
+function MembersModal({ open, onClose, members, ownerId, isOwner, currentUserId, onRemove, online }) {
+  const [confirmingId, setConfirmingId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      setConfirmingId(null);
+      setError('');
+    }
+  }, [open]);
+
+  const remove = async (member) => {
+    setBusyId(member._id);
+    setError('');
+    try {
+      await onRemove(member._id);
+      setConfirmingId(null);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Members (${members.length})`}>
+      <div className="p-5 space-y-3">
+        {error && (
+          <p role="alert" className="text-sm text-rose-600">
+            {error}
+          </p>
+        )}
+        <ul className="divide-y divide-slate-100">
+          {members.map((m) => {
+            const isOnline = online.some((o) => o.id === m._id);
+            const canRemove = isOwner && m._id !== currentUserId;
+            return (
+              <li key={m._id} className="flex items-center gap-3 py-2.5">
+                <Avatar name={m.name} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-700 truncate">
+                    {m.name}
+                    {m._id === ownerId && <span className="ml-1.5 text-xs text-slate-400">(owner)</span>}
+                    {m._id === currentUserId && <span className="ml-1.5 text-xs text-slate-400">(you)</span>}
+                  </p>
+                  <p className="text-xs text-slate-400 truncate">
+                    {m.email}
+                    {isOnline && <span className="ml-1.5 text-brand-600">· online</span>}
+                  </p>
+                </div>
+                {canRemove &&
+                  (confirmingId === m._id ? (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => remove(m)}
+                        disabled={busyId === m._id}
+                        className="flex items-center gap-1 text-xs font-semibold text-white bg-rose-500 hover:bg-rose-600 rounded-lg px-2.5 py-1.5 disabled:opacity-60"
+                      >
+                        {busyId === m._id && <Loader2 size={11} className="animate-spin" />}
+                        Remove {m.name.split(' ')[0]}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingId(null)}
+                        className="text-xs text-slate-500 hover:text-slate-700 px-1.5 py-1"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingId(m._id)}
+                      className="flex items-center gap-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg px-2.5 py-1.5 shrink-0"
+                      aria-label={`Remove ${m.name} from the project`}
+                    >
+                      <Trash2 size={12} aria-hidden="true" /> Remove
+                    </button>
+                  ))}
+              </li>
+            );
+          })}
+        </ul>
+        {isOwner && (
+          <p className="text-xs text-slate-400">
+            Removing a member also unassigns them from this project&apos;s tasks.
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function Column({ status, tasks, onAddTask, children, dropActive, onDragOver, onDragLeave, onDrop }) {
   const [composing, setComposing] = useState(false);
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
+  const composerRef = useRef(null);
   const meta = STATUSES.find((s) => s.key === status);
+
+  useEffect(() => {
+    if (composing) composerRef.current?.focus();
+  }, [composing]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -102,6 +218,8 @@ function Column({ status, tasks, onAddTask, children, dropActive, onDragOver, on
       await onAddTask(t, status);
       setTitle('');
       setComposing(false);
+    } catch {
+      // The board shows the error; keep the typed title so the user can retry.
     } finally {
       setBusy(false);
     }
@@ -142,7 +260,8 @@ function Column({ status, tasks, onAddTask, children, dropActive, onDragOver, on
         {composing ? (
           <form onSubmit={submit} className="bg-white rounded-xl border border-brand-200 p-2 shadow-sm">
             <textarea
-              autoFocus
+              ref={composerRef}
+              aria-label={`New task title for ${meta.label}`}
               rows={2}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -176,6 +295,7 @@ function Column({ status, tasks, onAddTask, children, dropActive, onDragOver, on
           </form>
         ) : (
           <button
+            type="button"
             onClick={() => setComposing(true)}
             className="w-full flex items-center gap-2 justify-center rounded-xl border-2 border-dashed border-slate-300 hover:border-brand-400 hover:text-brand-600 text-slate-400 text-sm font-medium py-2.5 transition-colors"
           >
@@ -198,7 +318,9 @@ export default function Board() {
   const [error, setError] = useState('');
   const [openTaskId, setOpenTaskId] = useState(null);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   const [online, setOnline] = useState([]);
+  const [actionError, setActionError] = useState('');
 
   // Filters
   const [search, setSearch] = useState('');
@@ -210,27 +332,41 @@ export default function Board() {
   const [dropColumn, setDropColumn] = useState(null);
   const dragStopped = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api
-      .get(`/projects/${projectId}`)
-      .then((res) => {
-        if (cancelled) return;
+  const loadBoard = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!silent) setLoading(true);
+      try {
+        const res = await api.get(`/projects/${projectId}`);
         setProject(res.data.project);
         setTasks(res.data.tasks);
-      })
-      .catch((err) => !cancelled && setError(getErrorMessage(err)))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
+        setError('');
+      } catch (err) {
+        if (!silent) setError(getErrorMessage(err));
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [projectId]
+  );
+
+  useEffect(() => {
+    loadBoard();
+  }, [loadBoard]);
 
   // --- Realtime wiring ---
   useEffect(() => {
-    if (!socket || !projectId) return;
-    socket.emit('project:join', { projectId });
+    if (!socket || !projectId) return undefined;
+
+    // Socket.io drops room membership on disconnect, so (re)join on every
+    // connect. After a reconnect, refetch the board to catch missed events.
+    let hasJoined = false;
+    const join = () => {
+      socket.emit('project:join', { projectId });
+      if (hasJoined) loadBoard({ silent: true });
+      hasJoined = true;
+    };
+    if (socket.connected) join();
+    socket.on('connect', join);
 
     const onPresence = (p) => {
       if (p.projectId === projectId) setOnline(p.online || []);
@@ -244,7 +380,7 @@ export default function Board() {
     };
     const onTaskUpdated = (payload) => {
       if (payload.projectId !== projectId) return;
-      setTasks((prev) => prev.map((t) => (t._id === payload.task._id ? payload.task : t)));
+      setTasks((prev) => prev.map((t) => (t._id === payload.task._id ? mergeTask(t, payload.task) : t)));
     };
     const onTaskDeleted = (payload) => {
       if (payload.projectId !== projectId) return;
@@ -255,7 +391,15 @@ export default function Board() {
       if (payload.projectId !== projectId) return;
       setTasks((prev) =>
         prev.map((t) =>
-          t._id === payload.taskId ? { ...t, commentCount: (t.commentCount || 0) + 1 } : t
+          t._id === payload.taskId
+            ? {
+                ...t,
+                // The server sends the authoritative total, so receiving the
+                // author's own event (or applying it twice) never double counts.
+                commentCount:
+                  typeof payload.commentCount === 'number' ? payload.commentCount : (t.commentCount || 0) + 1,
+              }
+            : t
         )
       );
     };
@@ -276,6 +420,10 @@ export default function Board() {
     };
     const onMemberLeft = (payload) => {
       if (payload.projectId !== projectId) return;
+      if (payload.userId === user?.id) {
+        setError('You were removed from this project.');
+        return;
+      }
       setProject((p) =>
         p
           ? {
@@ -300,9 +448,23 @@ export default function Board() {
     socket.on('comment:added', onCommentAdded);
     socket.on('member:joined', onMemberJoined);
     socket.on('member:left', onMemberLeft);
+    const onProjectDeleted = (payload) => {
+      if (payload.projectId !== projectId) return;
+      setOpenTaskId(null);
+      setError('This project was deleted by its owner.');
+    };
+    const onJoinError = (payload) => {
+      if (payload.projectId !== projectId) return;
+      setError(payload.error || 'You do not have access to this project.');
+    };
+    socket.on('project:deleted', onProjectDeleted);
+    socket.on('project:join:error', onJoinError);
 
     return () => {
       socket.emit('project:leave', { projectId });
+      socket.off('connect', join);
+      socket.off('project:deleted', onProjectDeleted);
+      socket.off('project:join:error', onJoinError);
       socket.off('presence:update', onPresence);
       socket.off('task:created', onTaskCreated);
       socket.off('task:updated', onTaskUpdated);
@@ -311,7 +473,7 @@ export default function Board() {
       socket.off('member:joined', onMemberJoined);
       socket.off('member:left', onMemberLeft);
     };
-  }, [socket, projectId]);
+  }, [socket, projectId, user?.id, loadBoard]);
 
   const members = useMemo(() => {
     const raw = project?.members || [];
@@ -378,29 +540,40 @@ export default function Board() {
     setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, status } : t)));
     try {
       const res = await api.patch(`/tasks/${taskId}`, { status });
-      setTasks((prev) => prev.map((t) => (t._id === taskId ? res.data.task : t)));
+      setTasks((prev) => prev.map((t) => (t._id === taskId ? mergeTask(t, res.data.task) : t)));
     } catch (err) {
       // Revert on failure
       setTasks((prev) => prev.map((t) => (t._id === taskId ? task : t)));
-      alert(getErrorMessage(err));
+      setActionError(getErrorMessage(err));
     }
   };
 
   const addTask = async (title, status) => {
     try {
-      await api.post('/tasks', { projectId, title, status });
-      // The socket echo adds the task to state (also fine if it doesn't arrive)
+      const res = await api.post('/tasks', { projectId, title, status });
+      const created = res.data.task;
+      // Add it right away; the task:created echo is de-duplicated by _id.
+      setTasks((prev) => (prev.some((t) => t._id === created._id) ? prev : [...prev, created]));
     } catch (err) {
-      alert(getErrorMessage(err));
+      setActionError(getErrorMessage(err));
+      throw err;
     }
   };
 
+  // Throws on failure so the members dialog can show the error inline.
   const removeMember = async (userId) => {
-    try {
-      await api.delete(`/projects/${projectId}/members/${userId}`);
-    } catch (err) {
-      alert(getErrorMessage(err));
-    }
+    const res = await api.delete(`/projects/${projectId}/members/${userId}`);
+    const unassigned = new Set(res.data.unassignedTaskIds || []);
+    setProject((p) =>
+      p ? { ...p, members: (p.members || []).filter((m) => (m._id || m.id) !== userId) } : p
+    );
+    setTasks((prev) =>
+      prev.map((t) =>
+        unassigned.has(t._id) || (t.assignee && (t.assignee._id || t.assignee) === userId)
+          ? { ...t, assignee: null }
+          : t
+      )
+    );
   };
 
   const openTask = tasks.find((t) => t._id === openTaskId) || null;
@@ -474,25 +647,22 @@ export default function Board() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="flex items-center -space-x-2 mr-1">
+              <button
+                type="button"
+                onClick={() => setMembersOpen(true)}
+                className="flex items-center -space-x-2 mr-1 rounded-full focus-visible:ring-2 focus-visible:ring-brand-400 outline-none"
+                aria-label={`View ${members.length} project member${members.length === 1 ? '' : 's'}${isOwner ? ' and manage the team' : ''}`}
+                title={isOwner ? 'Manage members' : 'View members'}
+              >
                 {members.slice(0, 6).map((m) => {
                   const isOnline = online.some((o) => o.id === m._id);
                   return (
-                    <div key={m._id} className="relative group/member">
+                    <span key={m._id} className="relative">
                       <Avatar name={m.name} size="sm" className="ring-2 ring-white" />
                       {isOnline && (
                         <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-brand-500 ring-2 ring-white" />
                       )}
-                      {isOwner && m._id !== user.id && (
-                        <button
-                          onClick={() => removeMember(m._id)}
-                          className="absolute inset-0 rounded-full bg-rose-500/90 text-white opacity-0 group-hover/member:opacity-100 transition-opacity flex items-center justify-center"
-                          title={`Remove ${m.name}`}
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      )}
-                    </div>
+                    </span>
                   );
                 })}
                 {members.length > 6 && (
@@ -500,7 +670,14 @@ export default function Board() {
                     +{members.length - 6}
                   </span>
                 )}
-              </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMembersOpen(true)}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-200 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700 text-slate-600 font-semibold px-3 py-2 text-xs transition-colors"
+              >
+                <Users size={14} aria-hidden="true" /> Members
+              </button>
               {isOwner && (
                 <button
                   onClick={() => setAddMemberOpen(true)}
@@ -520,6 +697,7 @@ export default function Board() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search tasks…"
+                aria-label="Search tasks"
                 className={clsx(inputCls, 'pl-8 w-48 sm:w-60')}
               />
             </div>
@@ -571,6 +749,19 @@ export default function Board() {
         </div>
       </div>
 
+      {actionError && (
+        <div
+          role="alert"
+          className="mx-4 sm:mx-6 mt-4 flex items-start gap-2 rounded-xl bg-rose-50 text-rose-700 text-sm px-3 py-2"
+        >
+          <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="flex-1">{actionError}</span>
+          <button type="button" onClick={() => setActionError('')} className="text-xs font-semibold underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Columns */}
       <main className="flex-1 overflow-x-auto">
         <div className="flex gap-4 p-4 sm:p-6 h-full min-h-[calc(100vh-230px)]">
@@ -609,11 +800,22 @@ export default function Board() {
           members={members}
           onClose={() => setOpenTaskId(null)}
           onChanged={(updated) =>
-            setTasks((prev) => prev.map((t) => (t._id === updated._id ? updated : t)))
+            setTasks((prev) => prev.map((t) => (t._id === updated._id ? mergeTask(t, updated) : t)))
           }
           onDeleted={(id) => setTasks((prev) => prev.filter((t) => t._id !== id))}
         />
       )}
+
+      <MembersModal
+        open={membersOpen}
+        onClose={() => setMembersOpen(false)}
+        members={members}
+        ownerId={project.owner?._id || project.owner}
+        isOwner={isOwner}
+        currentUserId={user?.id}
+        onRemove={removeMember}
+        online={online}
+      />
 
       <AddMemberModal
         project={project}
