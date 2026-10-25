@@ -44,6 +44,9 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
   const [posting, setPosting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [patchError, setPatchError] = useState('');
+  const [commentError, setCommentError] = useState('');
+  const [deleteError, setDeleteError] = useState('');
   const commentsEndRef = useRef(null);
   const taskId = task._id;
 
@@ -80,11 +83,12 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
 
   const patch = async (updates) => {
     setSaving(true);
+    setPatchError('');
     try {
       const res = await api.patch(`/tasks/${taskId}`, updates);
       onChanged(res.data.task);
     } catch (err) {
-      alert(getErrorMessage(err));
+      setPatchError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -105,6 +109,7 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
     const content = newComment.trim();
     if (!content) return;
     setPosting(true);
+    setCommentError('');
     try {
       const res = await api.post(`/tasks/${taskId}/comments`, { content });
       setComments((prev) => {
@@ -116,31 +121,38 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
       // event (the server sends it to the whole project room, author
       // included). Incrementing here as well double-counted the comment.
     } catch (err) {
-      alert(getErrorMessage(err));
+      setCommentError(getErrorMessage(err));
     } finally {
       setPosting(false);
     }
   };
 
   const doDelete = async () => {
+    setDeleteError('');
     try {
       await api.delete(`/tasks/${taskId}`);
       onDeleted(taskId);
       onClose();
     } catch (err) {
-      alert(getErrorMessage(err));
+      setDeleteError(getErrorMessage(err));
     }
   };
 
   const dueDateValue = dueDateInputValue(task.dueDate);
 
   return (
-    <Modal open onClose={onClose} width="max-w-2xl" title={undefined}>
+    <Modal open onClose={onClose} width="max-w-2xl" labelledById="task-title-input">
       <div className="p-5 sm:p-6">
+        {patchError && (
+          <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-sm px-3.5 py-2.5">
+            {patchError}
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <input
+              id="task-title-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={saveTitle}
@@ -188,6 +200,11 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
             </button>
           )}
         </div>
+        {deleteError && (
+          <p role="alert" className="mt-2 text-sm text-rose-600">
+            {deleteError}
+          </p>
+        )}
 
         {/* Fields grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
@@ -304,6 +321,11 @@ export default function TaskModal({ task, members, onClose, onChanged, onDeleted
             <div ref={commentsEndRef} />
           </div>
 
+          {commentError && (
+            <p role="alert" className="mt-3 text-sm text-rose-600">
+              {commentError}
+            </p>
+          )}
           <form onSubmit={addComment} className="flex gap-2 mt-4">
             <input
               value={newComment}

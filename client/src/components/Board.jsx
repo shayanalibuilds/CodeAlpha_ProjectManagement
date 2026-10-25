@@ -87,6 +87,93 @@ function AddMemberModal({ project, open, onClose, onAdded }) {
   );
 }
 
+function MembersModal({ project, members, online, isOwner, currentUserId, open, onClose, onRemoved, onError }) {
+  const [confirmingId, setConfirmingId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  const removeMember = async (userId) => {
+    setBusyId(userId);
+    try {
+      await api.delete(`/projects/${project._id}/members/${userId}`);
+      onRemoved(userId);
+      setConfirmingId(null);
+    } catch (err) {
+      onError(getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Project members">
+      <ul className="p-4 space-y-1" aria-label="Project members">
+        {members.map((m) => {
+          const isOnline = online.some((o) => o.id === m._id);
+          const isProjectOwner = (project.owner?._id || project.owner) === m._id;
+          const canRemove = isOwner && m._id !== currentUserId && !isProjectOwner;
+          return (
+            <li
+              key={m._id}
+              className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-slate-50"
+            >
+              <Avatar name={m.name} size="sm" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-700 truncate flex items-center gap-2">
+                  {m.name}
+                  {isProjectOwner && (
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-brand-600 bg-brand-50 rounded-md px-1.5 py-0.5">
+                      Owner
+                    </span>
+                  )}
+                  {isOnline && (
+                    <span className="flex items-center gap-1 text-[10px] font-semibold text-brand-600">
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand-500" /> online
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-slate-400 truncate">{m.email}</p>
+              </div>
+              {canRemove &&
+                (confirmingId === m._id ? (
+                  <div className="flex items-center gap-1.5" role="alertdialog" aria-label={`Confirm removing ${m.name}`}>
+                    <span className="text-xs text-slate-500 hidden sm:inline">Remove?</span>
+                    <button
+                      onClick={() => removeMember(m._id)}
+                      disabled={busyId === m._id}
+                      className="flex items-center gap-1 text-xs font-semibold text-white bg-rose-500 hover:bg-rose-600 rounded-lg px-2.5 py-1.5 disabled:opacity-60"
+                    >
+                      {busyId === m._id && <Loader2 size={11} className="animate-spin" />}
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setConfirmingId(null)}
+                      className="text-xs text-slate-500 hover:text-slate-700 px-1.5 py-1.5"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmingId(m._id)}
+                    className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg px-2.5 py-1.5 transition-colors"
+                    aria-label={`Remove ${m.name} from this project`}
+                  >
+                    <Trash2 size={12} /> Remove
+                  </button>
+                ))}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="px-4 pb-4">
+        <p className="text-xs text-slate-400">
+          Removing a member also unassigns them from every task in this project.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+
 function Column({ status, tasks, onAddTask, children, dropActive, onDragOver, onDragLeave, onDrop }) {
   const [composing, setComposing] = useState(false);
   const [title, setTitle] = useState('');
@@ -198,7 +285,9 @@ export default function Board() {
   const [error, setError] = useState('');
   const [openTaskId, setOpenTaskId] = useState(null);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   const [online, setOnline] = useState([]);
+  const [boardError, setBoardError] = useState('');
 
   // Filters
   const [search, setSearch] = useState('');
@@ -419,7 +508,7 @@ export default function Board() {
     } catch (err) {
       // Revert on failure
       setTasks((prev) => prev.map((t) => (t._id === taskId ? task : t)));
-      alert(getErrorMessage(err));
+      setBoardError(getErrorMessage(err));
     }
   };
 
@@ -431,7 +520,7 @@ export default function Board() {
         prev.some((t) => t._id === res.data.task._id) ? prev : [...prev, res.data.task]
       );
     } catch (err) {
-      alert(getErrorMessage(err));
+      setBoardError(getErrorMessage(err));
     }
   };
 
@@ -439,7 +528,7 @@ export default function Board() {
     try {
       await api.delete(`/projects/${projectId}/members/${userId}`);
     } catch (err) {
-      alert(getErrorMessage(err));
+      setBoardError(getErrorMessage(err));
     }
   };
 
@@ -518,19 +607,10 @@ export default function Board() {
                 {members.slice(0, 6).map((m) => {
                   const isOnline = online.some((o) => o.id === m._id);
                   return (
-                    <div key={m._id} className="relative group/member">
+                    <div key={m._id} className="relative">
                       <Avatar name={m.name} size="sm" className="ring-2 ring-white" />
                       {isOnline && (
                         <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-brand-500 ring-2 ring-white" />
-                      )}
-                      {isOwner && m._id !== user.id && (
-                        <button
-                          onClick={() => removeMember(m._id)}
-                          className="absolute inset-0 rounded-full bg-rose-500/90 text-white opacity-0 group-hover/member:opacity-100 transition-opacity flex items-center justify-center"
-                          title={`Remove ${m.name}`}
-                        >
-                          <Trash2 size={11} />
-                        </button>
                       )}
                     </div>
                   );
@@ -541,6 +621,12 @@ export default function Board() {
                   </span>
                 )}
               </div>
+              <button
+                onClick={() => setMembersOpen(true)}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-200 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700 text-slate-600 font-semibold px-3 py-2 text-xs transition-colors"
+              >
+                <Users size={14} /> Members
+              </button>
               {isOwner && (
                 <button
                   onClick={() => setAddMemberOpen(true)}
@@ -611,6 +697,23 @@ export default function Board() {
         </div>
       </div>
 
+      {/* Board error banner */}
+      {boardError && (
+        <div
+          role="alert"
+          className="mx-4 sm:mx-6 mt-4 flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-sm px-4 py-2.5"
+        >
+          <span>{boardError}</span>
+          <button
+            onClick={() => setBoardError('')}
+            className="text-rose-600 hover:text-rose-800 font-semibold text-xs"
+            aria-label="Dismiss error"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Columns */}
       <main className="flex-1 overflow-x-auto">
         <div className="flex gap-4 p-4 sm:p-6 h-full min-h-[calc(100vh-230px)]">
@@ -666,6 +769,18 @@ export default function Board() {
         open={addMemberOpen}
         onClose={() => setAddMemberOpen(false)}
         onAdded={refreshProject}
+      />
+
+      <MembersModal
+        project={project}
+        members={members}
+        online={online}
+        isOwner={Boolean(isOwner)}
+        currentUserId={user?.id}
+        open={membersOpen}
+        onClose={() => setMembersOpen(false)}
+        onRemoved={removeMember}
+        onError={setBoardError}
       />
     </div>
   );

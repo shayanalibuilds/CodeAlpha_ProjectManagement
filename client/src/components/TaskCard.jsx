@@ -10,6 +10,22 @@ import { formatDueDate, isOverdue } from '../lib/dates';
 export default function TaskCard({ task, onOpen, onDragStart, onDragEnd, dragging }) {
   const priority = PRIORITIES[task.priority] || PRIORITIES.MEDIUM;
   const overdue = isOverdue(task);
+  const statusMeta = { TODO: 'To-Do', IN_PROGRESS: 'In-Progress', DONE: 'Done' };
+  const accessibleName = [
+    task.title,
+    statusMeta[task.status] || task.status,
+    `priority ${priority.label}`,
+    task.dueDate ? `due ${formatDueDate(task.dueDate)}` : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const activate = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onOpen(task);
+    }
+  };
 
   return (
     <div
@@ -17,8 +33,12 @@ export default function TaskCard({ task, onOpen, onDragStart, onDragEnd, draggin
       onDragStart={(e) => onDragStart(e, task._id)}
       onDragEnd={onDragEnd}
       onClick={() => onOpen(task)}
+      onKeyDown={activate}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open task: ${accessibleName}`}
       className={clsx(
-        'group bg-white rounded-xl border border-slate-200 shadow-card hover:shadow-pop hover:border-brand-200 cursor-pointer transition-all p-3',
+        'group bg-white rounded-xl border border-slate-200 shadow-card hover:shadow-pop hover:border-brand-200 cursor-pointer transition-all p-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:border-brand-300',
         dragging && 'card-dragging'
       )}
     >

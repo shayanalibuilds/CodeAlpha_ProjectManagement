@@ -120,17 +120,19 @@ function CreateProjectModal({ open, onClose, onCreated }) {
 function ProjectCard({ project, isOwner, onDeleted }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState('');
   const colors = PROJECT_COLORS[project.color] || PROJECT_COLORS.emerald;
   const counts = project.taskCounts || { total: 0, todo: 0, inProgress: 0, done: 0 };
   const pct = counts.total ? Math.round((counts.done / counts.total) * 100) : 0;
 
   const doDelete = async () => {
     setDeleting(true);
+    setError('');
     try {
       await api.delete(`/projects/${project._id}`);
       onDeleted(project._id);
     } catch (err) {
-      alert(getErrorMessage(err));
+      setError(getErrorMessage(err));
       setDeleting(false);
     }
   };
@@ -178,6 +180,11 @@ function ProjectCard({ project, isOwner, onDeleted }) {
         <p className="text-sm text-slate-500 mt-1 line-clamp-2 min-h-[2.5rem]">
           {project.description || 'No description yet.'}
         </p>
+        {error && (
+          <p role="alert" className="mt-2 text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-2 py-1.5">
+            {error}
+          </p>
+        )}
 
         <div className="mt-4 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-xl bg-slate-50 py-2">
@@ -240,14 +247,17 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
 
   const load = async () => {
+    setLoading(true);
+    setError('');
     try {
       const res = await api.get('/projects');
       setProjects(res.data.projects);
     } catch (err) {
-      alert(getErrorMessage(err));
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -333,6 +343,21 @@ export default function Dashboard() {
         {loading ? (
           <div className="flex justify-center py-16">
             <Spinner className="w-7 h-7" />
+          </div>
+        ) : error ? (
+          <div className="bg-white rounded-2xl shadow-card border border-slate-100">
+            <EmptyState
+              icon={KanbanSquare}
+              title="Could not load your projects"
+              hint={error}
+            >
+              <button
+                onClick={load}
+                className="flex items-center gap-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold px-4 py-2.5 text-sm transition-colors"
+              >
+                <Loader2 size={16} /> Try again
+              </button>
+            </EmptyState>
           </div>
         ) : projects.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-card border border-slate-100">
